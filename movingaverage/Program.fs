@@ -19,7 +19,6 @@ let makeUrl symbol (dfrom:DateTime) (dto:DateTime) =
         "&g=d&b=" + dfrom.Day.ToString() + "&a=" + monthfix(dfrom) + "&c=" + dfrom.Year.ToString() +
         "&ignore=.csv")
 
-
 let fetch (url : Uri) = 
     let req = WebRequest.Create (url) :?> HttpWebRequest
     use stream = req.GetResponse().GetResponseStream()
@@ -35,14 +34,24 @@ let reformat (response:string) =
     
 let getRequest uri = (fetch >> reformat) uri
 
-let makeMove (stock:string [] []) =
-    let avgList dur (array:string [] []) = Array.mapi ( fun i (x:string []) ->
-        [| Array.sub array ( max ( i - dur ) 1 ) i |> Array.averageBy( fun ( elem:string [] ) -> ( elem.[4] |> float ) ); x.[4] |> float |] ) array
-    
-    Array.mapi ( fun i (x:string []) -> [| Array.sub stock ( max ( i - 5 ) 1 ) i |> Array.averageBy( fun ( elem:string [] ) -> ( elem.[4] |> float ) ); x.[4] |> float |] ) stock
-    //Array.fold( fun acc (elem:float []) ->
-    //    if elem.[0] >= elem.[1] then 1000.0 * elem.[1] else -1000.0 * elem.[1]
-    //) 10000.0 ( avgList 15 stock )
+let movingAverage dur (stock:string [] []) =
+    Array.mapi ( fun i (x:string []) -> 
+        let curDur = min dur i
+        if i = 0
+        then [| 0.0; 0.0 |] 
+        else [| stock.[(1+i-curDur)..i] |> Array.averageBy( fun ( elem:string [] ) -> ( elem.[4] |> float ) ); x.[4] |> float |] ) stock
+    |> Array.fold( fun [|n;p|] (elem:float []) -> 
+       if elem.[0] >= elem.[1] then [|0.0; p + ( n * elem.[1] )|] else [|n + ( p / elem.[1] ); 0.0|]) [|0.0; 100000.0|]
 
-let stocks = makeUrl "^GSPC" (new DateTime(2016, 1, 1)) (new DateTime(2017, 1, 1)) |> getRequest |> makeMove
-                    
+let gspc = makeUrl "^GSPC" (new DateTime(2002, 1, 1)) (new DateTime(2017, 1, 5)) |> getRequest
+let msft = makeUrl "MSFT" (new DateTime(2016, 1, 1)) (new DateTime(2017, 1, 5)) |> getRequest
+
+let stockToProfit amount (data:string [] []) = 
+    let datalen = data.Length
+    amount * ( data.[datalen-1].[4] |> float )
+
+let profitByWindow stocks = Array.map( fun f -> 
+    let pnl = movingAverage f stocks
+    [ f |> float; max ( stockToProfit pnl.[0] stocks ) pnl.[1] ] ) [| 5..5..120 |]
+
+profitByWindow msft
